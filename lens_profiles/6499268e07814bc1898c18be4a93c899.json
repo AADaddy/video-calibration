@@ -1,0 +1,38 @@
+{
+  "id": "6499268e07814bc1898c18be4a93c899",
+  "camera_id": "",
+  "profile_name": "GPT estimate 2688x1520 (scaled, untuned)",
+  "lens_model": "opencv_fisheye",
+  "source_width": 2688,
+  "source_height": 1520,
+  "camera_matrix_K": [
+    [
+      1747.2,
+      0.0,
+      1344.0
+    ],
+    [
+      0.0,
+      1747.2,
+      760.0
+    ],
+    [
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "distortion_coefficients_D": [
+    -0.18,
+    0.03,
+    0.0,
+    0.0
+  ],
+  "balance": 0.0,
+  "output_width": 2688,
+  "output_height": 1520,
+  "active": true,
+  "created_at": "2026-06-23T10:33:21.747190Z",
+  "updated_at": "2026-06-23T10:33:21.747190Z",
+  "notes": "K/D estimated by GPT for ~1327x745; fx/fy/cx/cy scaled x2.026 to 2688x1520, center snapped to true frame center. D unchanged (resolution-independent). UNVERIFIED guess - validate against undistorted preview before trusting."
+}
