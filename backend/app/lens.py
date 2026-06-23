@@ -198,6 +198,35 @@ def undistort_points(points: list[Point], profile: LensProfile) -> list[Point]:
     return [Point(x=round(float(x), 3), y=round(float(y), 3)) for x, y in undistorted]
 
 
+def redistort_points(undistorted_xy: np.ndarray, profile: LensProfile) -> np.ndarray:
+    """Inverse of undistort_points: undistorted (new_K image) coords -> raw fisheye pixels.
+
+    Lets us recover the raw pixel a control point would occupy in the original
+    distorted frame, so calibration can be exported in raw coordinate space for
+    a production pipeline that maps raw points directly.
+    """
+    invalid = validate_profile_shape(profile)
+    if invalid:
+        raise HTTPException(status_code=400, detail=" ".join(invalid))
+    pts = np.asarray(undistorted_xy, dtype=np.float64).reshape(-1, 2)
+    if pts.size == 0:
+        return pts
+
+    K = np.asarray(profile.camera_matrix_K, dtype=np.float64)
+    D = np.asarray(profile.distortion_coefficients_D, dtype=np.float64).reshape(4, 1)
+    output_width = profile.output_width or profile.source_width
+    output_height = profile.output_height or profile.source_height
+    new_K = cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(
+        K, D, (profile.source_width, profile.source_height), np.eye(3),
+        balance=float(profile.balance), new_size=(output_width, output_height),
+    )
+    normalized = np.column_stack([
+        (pts[:, 0] - new_K[0, 2]) / new_K[0, 0],
+        (pts[:, 1] - new_K[1, 2]) / new_K[1, 1],
+    ])
+    return cv2.fisheye.distortPoints(normalized.reshape(-1, 1, 2), K, D).reshape(-1, 2)
+
+
 def generate_undistorted_preview(frame: np.ndarray, profile: LensProfile) -> np.ndarray:
     invalid = validate_profile_shape(profile)
     if invalid:

@@ -53,8 +53,16 @@ class MappingEngine:
 
     @classmethod
     def from_calibration(cls, pairs: list, lens_profile: LensProfile | None = None) -> "MappingEngine":
-        """Build from enabled+complete point pairs (objects exposing .source / .floor_map)."""
-        usable = [p for p in pairs if p.enabled and p.source is not None and p.floor_map is not None]
+        """Build from enabled+complete point pairs.
+
+        Accepts any object with `undistorted_camera` / `camera` / `floor_map` /
+        `enabled` (both PointPair and CalibrationPointPairIn qualify). The source
+        point prefers undistorted camera coords, falling back to raw.
+        """
+        def source_of(p):
+            return getattr(p, "undistorted_camera", None) or getattr(p, "camera", None)
+
+        usable = [p for p in pairs if p.enabled and source_of(p) is not None and p.floor_map is not None]
 
         lens = None
         if lens_profile is not None and not validate_profile_shape(lens_profile):
@@ -71,7 +79,7 @@ class MappingEngine:
             )
             lens = {"K": K, "D": D, "new_K": new_K}
 
-        source = np.asarray([[p.source.x, p.source.y] for p in usable], dtype=np.float64)
+        source = np.asarray([[source_of(p).x, source_of(p).y] for p in usable], dtype=np.float64)
         target = np.asarray([[p.floor_map.x, p.floor_map.y] for p in usable], dtype=np.float64)
 
         homography = None

@@ -982,3 +982,34 @@ select:focus {
 .validation-statusbar strong {
   font-size: 0.95rem;
 }
+
+/* --- Export dialog --- */
+.modal--wide {
+  max-width: 46rem;
+  width: 92vw;
+}
+
+.export-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.export-cols label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+}
+
+.export-cols textarea {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+  resize: vertical;
+}
+
+@media (max-width: 640px) {
+  .export-cols {
+    grid-template-columns: 1fr;
+  }
+}

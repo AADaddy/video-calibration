@@ -134,6 +134,35 @@ export interface ValidationField {
   has_tps: boolean;
 }
 
+export interface CalibrationExport {
+  schema_version: string;
+  coordinate_space: string;
+  camera_id: string;
+  floor_id: string;
+  floor_map_id: string;
+  camera_points: number[][];
+  floor_map_points: number[][];
+  disabled_indexes: number[];
+  camera_points_text: string;
+  floor_map_points_text: string;
+  lens_profile: LensProfile | null;
+  homography_matrix: number[][] | null;
+  tps: Record<string, unknown> | null;
+  roi_polygon: number[][];
+  validation: {
+    quality: string;
+    homography_status: string;
+    mean_error_px: number | null;
+    median_error_px: number | null;
+    max_error_px: number | null;
+    outlier_count: number;
+    enabled_pair_count: number;
+    total_pair_count: number;
+  };
+  metadata: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
 export interface SessionSummary {
   id: string;
   name: string;

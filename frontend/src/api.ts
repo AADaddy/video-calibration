@@ -3,6 +3,7 @@ import type {
   CalibrationSession,
   LensProfile,
   LensProfileValidation,
+  CalibrationExport,
   PointPair,
   SessionSummary,
   ValidationField,
@@ -136,6 +137,10 @@ export function analyzeCalibration(pointPairs: PointPair[]): Promise<Calibration
       point_pairs: pointPairs,
     }),
   });
+}
+
+export function exportCalibration(sessionId: string, space: "undistorted" | "raw" = "undistorted"): Promise<CalibrationExport> {
+  return request(`/sessions/${sessionId}/export?space=${space}`);
 }
 
 export function getValidationField(payload: {

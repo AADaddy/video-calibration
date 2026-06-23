@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
-  import { analyzeCalibration, createSession, getSession, getValidationField, getVideoMetadata, listLensProfiles, listSessions, mediaUrl, undistortedPreviewUrl, updateSession, uploadMedia, validateLensProfile, videoFrameUrl } from "./api";
-  import type { CalibrationSession, LensProfile, LensProfileValidation, MediaReference, Point, PointPair, SessionSummary, ValidationField } from "./types";
+  import { analyzeCalibration, createSession, exportCalibration, getSession, getValidationField, getVideoMetadata, listLensProfiles, listSessions, mediaUrl, undistortedPreviewUrl, updateSession, uploadMedia, validateLensProfile, videoFrameUrl } from "./api";
+  import type { CalibrationExport, CalibrationSession, LensProfile, LensProfileValidation, MediaReference, Point, PointPair, SessionSummary, ValidationField } from "./types";
 
   let sessions: SessionSummary[] = [];
   let lensProfiles: LensProfile[] = [];
@@ -51,6 +51,13 @@
   let hoverTps: Point | null = null;
   let validationTrail: { camera: Point; floor: Point }[] = [];
   const TRAIL_MAX = 60;
+
+  // --- Export state ---
+  let showExportDialog = false;
+  let exporting = false;
+  let exportPackage: CalibrationExport | null = null;
+  let copiedField = "";
+  let exportSpace: "undistorted" | "raw" = "undistorted";
 
   $: cameraMediaUrl = mediaUrl(currentSession?.camera_media?.url);
   $: floorplanMediaUrl = mediaUrl(currentSession?.floorplan_media?.url);
@@ -803,6 +810,66 @@
     if (!point) return "—";
     return `${Math.round(point.x)}, ${Math.round(point.y)}`;
   }
+
+  // --- Export ---
+  async function openExport() {
+    if (!currentSession) return;
+    showExportDialog = true;
+    // Persist current edits first so the export reflects the on-screen state.
+    try {
+      currentSession = await updateSession(currentSession);
+    } catch (error) {
+      errorMessage = error instanceof Error ? error.message : "Failed to save before export";
+    }
+    await refreshExport();
+  }
+
+  async function refreshExport() {
+    if (!currentSession) return;
+    exporting = true;
+    errorMessage = "";
+    exportPackage = null;
+    try {
+      exportPackage = await exportCalibration(currentSession.id, exportSpace);
+    } catch (error) {
+      errorMessage = error instanceof Error ? error.message : "Failed to build export";
+    } finally {
+      exporting = false;
+    }
+  }
+
+  function setExportSpace(space: "undistorted" | "raw") {
+    if (exportSpace === space) return;
+    exportSpace = space;
+    void refreshExport();
+  }
+
+  function closeExport() {
+    showExportDialog = false;
+    copiedField = "";
+  }
+
+  function downloadExport() {
+    if (!exportPackage || !currentSession) return;
+    const blob = new Blob([JSON.stringify(exportPackage, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const safeName = (currentSession.name || "calibration").replace(/[^a-z0-9-_]+/gi, "_");
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${safeName}-calibration.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function copyField(field: "camera" | "floor", text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      copiedField = field;
+      setTimeout(() => { if (copiedField === field) copiedField = ""; }, 1500);
+    } catch (error) {
+      errorMessage = error instanceof Error ? error.message : "Clipboard copy failed";
+    }
+  }
 </script>
 
 <main class="app-shell">
@@ -824,6 +891,14 @@
         </button>
       </div>
       <span class="status-pill">{currentSession ? "Session open" : "No session"}</span>
+      <button
+        class="button"
+        disabled={!currentSession || !homography?.ready || exporting}
+        title={homography?.ready ? "Export calibration package" : "Run a homography first"}
+        on:click={openExport}
+      >
+        {exporting ? "Exporting…" : "Export"}
+      </button>
       <button class="button button--primary" disabled={!currentSession || saving} on:click={handleSaveSession}>
         {saving ? "Saving" : "Save session"}
       </button>
@@ -1535,6 +1610,75 @@
           </button>
         </div>
       </form>
+    </div>
+  {/if}
+
+  {#if showExportDialog}
+    <div class="modal-backdrop">
+      <div class="modal modal--wide" role="dialog" aria-modal="true" aria-labelledby="export-title">
+        <div class="panel__header">
+          <div>
+            <h2 id="export-title">Export calibration</h2>
+            <p>For homography in production. Choose the coordinate space the production pipeline expects.</p>
+          </div>
+          <button class="button" on:click={closeExport}>Close</button>
+        </div>
+
+        <div class="seg">
+          <button class:button--primary={exportSpace === "undistorted"} class="button" on:click={() => setExportSpace("undistorted")}>Undistort</button>
+          <button class:button--primary={exportSpace === "raw"} class="button" on:click={() => setExportSpace("raw")}>Redistort (raw)</button>
+        </div>
+        <p class="empty-copy">
+          {#if exportSpace === "undistorted"}
+            <strong>Undistort:</strong> camera_points are lens-corrected. Production must undistort detection foot-points (using the included lens profile) before applying homography. Most stable.
+          {:else}
+            <strong>Redistort (raw):</strong> camera_points are converted back to raw fisheye pixels. Drop-in for production that maps raw points directly — no undistort step needed, but homography on raw fisheye is less accurate.
+          {/if}
+        </p>
+
+        {#if exporting}
+          <p class="empty-copy">Building export…</p>
+        {:else if exportPackage}
+          <dl class="meta-grid">
+            <div><dt>Camera ID</dt><dd>{exportPackage.camera_id || "—"}</dd></div>
+            <div><dt>Floor map ID</dt><dd>{exportPackage.floor_map_id || "—"}</dd></div>
+            <div><dt>Space</dt><dd>{exportPackage.coordinate_space}</dd></div>
+            <div><dt>Points</dt><dd>{exportPackage.validation.enabled_pair_count} enabled / {exportPackage.validation.total_pair_count}</dd></div>
+            <div><dt>Homography mean error</dt><dd>{exportPackage.validation.mean_error_px != null ? `${exportPackage.validation.mean_error_px.toFixed(1)} px` : "—"}</dd></div>
+            <div><dt>Homography max error</dt><dd>{exportPackage.validation.max_error_px != null ? `${exportPackage.validation.max_error_px.toFixed(1)} px` : "—"}</dd></div>
+            <div><dt>Lens profile</dt><dd>{exportPackage.lens_profile ? exportPackage.lens_profile.profile_name : "None"}</dd></div>
+            <div><dt>Quality</dt><dd>{exportPackage.validation.quality}</dd></div>
+          </dl>
+
+          {#if !exportPackage.camera_id || !exportPackage.floor_map_id}
+            <p class="video-message video-message--error">Camera ID and Floor map ID are empty — fill them in the sidebar so production can match this calibration.</p>
+          {/if}
+          {#if exportSpace === "raw" && !exportPackage.lens_profile}
+            <p class="video-message video-message--error">No lens profile applied — raw and undistorted points are identical. Validate a lens profile for fisheye cameras.</p>
+          {/if}
+
+          <div class="export-cols">
+            <label>
+              camera_points ({exportPackage.coordinate_space})
+              <textarea readonly rows="6" value={exportPackage.camera_points_text}></textarea>
+              <button class="button" on:click={() => exportPackage && copyField("camera", exportPackage.camera_points_text)}>
+                {copiedField === "camera" ? "Copied ✓" : "Copy camera_points"}
+              </button>
+            </label>
+            <label>
+              floor_map_points
+              <textarea readonly rows="6" value={exportPackage.floor_map_points_text}></textarea>
+              <button class="button" on:click={() => exportPackage && copyField("floor", exportPackage.floor_map_points_text)}>
+                {copiedField === "floor" ? "Copied ✓" : "Copy floor_map_points"}
+              </button>
+            </label>
+          </div>
+
+          <div class="modal__actions">
+            <button class="button button--primary" on:click={downloadExport}>Download JSON package</button>
+          </div>
+        {/if}
+      </div>
     </div>
   {/if}
 </main>

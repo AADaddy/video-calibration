@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from shutil import copyfileobj
 from uuid import uuid4
@@ -15,6 +16,7 @@ from app.calibration import (
     ValidationFieldIn,
     analyze_calibration as run_calibration_analysis,
 )
+from app.export import build_calibration_export
 from app.mapping import MappingEngine
 from app.lens import (
     LensProfile,
@@ -33,6 +35,7 @@ BASE_DIR = Path(__file__).resolve().parents[2]
 SESSION_DIR = BASE_DIR / "sessions"
 MEDIA_DIR = BASE_DIR / "media"
 LENS_PROFILE_DIR = BASE_DIR / "lens_profiles"
+EXPORT_DIR = BASE_DIR / "calibration_exports"
 
 app = FastAPI(title="Video Calibration", version="0.1.0")
 store = SessionStore(SESSION_DIR)
@@ -254,6 +257,33 @@ def create_session(payload: SessionCreate) -> CalibrationSession:
         floor_map_id=payload.floor_map_id or "",
     )
     return store.create(session)
+
+
+@app.get("/sessions/{session_id}/export")
+def export_session(session_id: str, space: str = Query("undistorted", pattern="^(undistorted|raw)$")) -> dict:
+    """Build the production calibration export package.
+
+    space=undistorted: lens-corrected camera_points (stable homography; prod must
+      undistort detections first).
+    space=raw: camera_points re-distorted to raw fisheye pixels (drop-in for prod
+      that maps raw points directly).
+
+    Read-only: assembles from the stored session and writes an audit copy to
+    calibration_exports/. Does not mutate any external system.
+    """
+    session = store.get(session_id)
+    lens_profile = None
+    if session.lens_profile_id:
+        try:
+            lens_profile = lens_store.get(session.lens_profile_id)
+        except HTTPException:
+            lens_profile = None
+    package = build_calibration_export(session, lens_profile, space=space)
+
+    EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+    safe_id = "".join(ch for ch in session_id if ch.isalnum() or ch in ("-", "_"))
+    (EXPORT_DIR / f"{safe_id}-{package['coordinate_space']}.json").write_text(json.dumps(package, indent=2), encoding="utf-8")
+    return package
 
 
 @app.get("/sessions/{session_id}", response_model=CalibrationSession)
